@@ -6,10 +6,13 @@ from botocore.exceptions import ClientError
 
 app = FastAPI()
 
-# S3 bucket name
-BUCKET_NAME = os.getenv("vimal-cloud-storage")
+# S3 bucket configuration
+BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
 
-# Create S3 client
+if not BUCKET_NAME:
+    raise ValueError("S3_BUCKET_NAME environment variable is not set")
+
+# Create S3 client using EC2 IAM Role
 s3 = boto3.client("s3")
 
 
@@ -21,7 +24,6 @@ def home():
 # Upload file to S3
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
-
     try:
         s3.upload_fileobj(
             file.file,
@@ -37,11 +39,13 @@ async def upload_file(file: UploadFile = File(...)):
     except ClientError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+    finally:
+        await file.close()
+
 
 # List files from S3
 @app.get("/files")
 def list_files():
-
     try:
         response = s3.list_objects_v2(
             Bucket=BUCKET_NAME
@@ -57,10 +61,9 @@ def list_files():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Download file
+# Download file using presigned URL
 @app.get("/download/{filename}")
 def download_file(filename: str):
-
     try:
         url = s3.generate_presigned_url(
             "get_object",
@@ -71,16 +74,18 @@ def download_file(filename: str):
             ExpiresIn=300
         )
 
-        return {"download_url": url}
+        return {
+            "message": "Download URL generated successfully",
+            "download_url": url
+        }
 
     except ClientError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
 
-# Delete file
+# Delete file from S3
 @app.delete("/delete/{filename}")
 def delete_file(filename: str):
-
     try:
         s3.delete_object(
             Bucket=BUCKET_NAME,
